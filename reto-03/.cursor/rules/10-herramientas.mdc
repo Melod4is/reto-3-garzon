@@ -1,0 +1,44 @@
+---
+description: Contrato obligatorio de herramientas oc_* (zod, execute que nunca lanza, salidas tipadas)
+globs: src/tools/**,src/lib/**,modulo/tools/**
+alwaysApply: false
+---
+
+# Contrato de herramientas
+
+Cada export de `src/tools/oc.ts` es `{ description, args, execute }`. Nombre visible al modelo: `oc_<export>`.
+
+- `description`: una frase precisa (es lo único que el modelo lee para decidir).
+- `args`: objeto de esquemas `zod`, `.describe()` en **cada** campo. El backend valida antes de ejecutar.
+- `execute(args, ctx: { directory; sessionId })`: devuelve **string** JSON `{ ok: true, data }` | `{ ok: false, error }`. **Nunca lanza**: envolver todo en try/catch y traducir a error legible en español con qué pedir al solicitante.
+- Rutas: `path.join(ctx.directory, "fixtures/reto-03/...")` y `path.join(ctx.directory, "out/...")`. Esto permite tests aislados en un directorio temporal.
+
+```ts
+// ✅ execute traduce errores
+async execute(args, ctx) {
+  const r = await leerPaquete(ctx.directory, args.caso) // función pura de src/lib
+  return JSON.stringify(r) // r ya es { ok, data } | { ok, error }
+}
+```
+
+## Herramientas y salidas
+| Herramienta | Salida `data` |
+|---|---|
+| `leer_paquete({caso})` | `Paquete` (PRD 7.2) + `faltantes: string[]` (adjuntos ausentes = `null`, no excepción) |
+| `validar({caso, paquete})` | `{ apta, bloqueos[], confirmaciones[], derivados, retroactiva }` |
+| `construir_payload({caso, paquete, derivados})` | `{ orden: OrdenCompra, trazabilidad: "out/<caso>/trazabilidad.json" }` |
+| `generar_evidencia({caso})` | `{ ruta, sha256 }` (P0 `.txt`, P1 `.pdf`) |
+| `crear({caso, payload, confirmado?})` | `{ numero_oc, fecha, idempotente }` |
+
+Hallazgo (`bloqueos[]`/`confirmaciones[]`): `{ codigo: "RC1".."RC10", detalle, accion_sugerida, valores? }`. RC5 lleva `valores: { solicitud, cotizacion, diferencia_pct }`.
+Derivado: `derivados.<campo> = { valor, fuente: "maestro.proveedores" }`.
+Trazabilidad (`out/<caso>/trazabilidad.json`): `Array<{ campo, valor, fuente }>` con `fuente` ∈ `solicitud | cotizacion | maestro.<nombre> | derivado`.
+`out/control.csv`: encabezado `solicitud_id,resultado,numero_oc,retroactiva,bloqueos,confirmaciones,ts`; `resultado` ∈ `creada | bloqueado | pendiente`; listas de códigos separadas por `|`.
+`out/sap/ordenes.jsonl`: una línea `{ numero_oc, fecha, orden }` por OC creada.
+
+## Reglas no negociables
+- `crear` **re-valida internamente** desde fixtures; no confía en el `payload` ni en `apta` que mande el modelo.
+- `crear` solo crea si no hay bloqueos y (sin confirmaciones **o** `confirmado === true`).
+- Toda llamada a `crear` (creada, bloqueada, pendiente) agrega fila a `out/control.csv`, incluso si `payload` falta o no es válido.
+- `construir_payload` y `generar_evidencia` usan la misma función de hash → `aprobador.evidencia_sha256` coincide.
+- Las herramientas son importables desde `demo.ts` y `modulo/` sin levantar el servidor.

@@ -1,0 +1,52 @@
+---
+description: Ciclo del agente (CA1-CA5), adaptador LLM, confirmación humana, API y seguridad de claves
+globs: src/agent/**,src/llm/**,src/server.ts,agent/**,web/**
+alwaysApply: false
+---
+
+# Ciclo del agente y LLM
+
+## Adaptador LLM
+```ts
+// src/llm/adapter.ts
+export interface LlmAdapter {
+  enviar(mensajes: Mensaje[], herramientas: HerramientaSpec[]): Promise<RespuestaLlm>
+}
+export type HerramientaSpec = { nombre: string; descripcion: string; parametros: Record<string, unknown> } // JSON Schema desde zod
+export type RespuestaLlm = { texto: string | null; llamadas: { id: string; nombre: string; args: unknown }[]; uso?: { tokens: number } }
+```
+Cambiar de proveedor = nueva clase que implementa `LlmAdapter`. El loop no conoce al proveedor.
+Proveedor por defecto: `OpenAiLlm` (`src/llm/openai.ts`) con `gpt-4.1-mini`, `temperature: 0`, `parallel_tool_calls: false`. Es compatible con cualquier endpoint OpenAI (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`). Sin clave se usa `LlmNoConfigurado` (responde aviso, no rompe).
+Existe un `FakeLlm` con respuestas guionadas para tests (en `tests/`, no en producción).
+Loop propio (ReAct con tool calling). No introducir LangChain/LangGraph sin decisión documentada en `SOLUCION.md`.
+
+## `ejecutarTurno` (src/agent/loop.ts)
+Firma: `ejecutarTurno({ llm, herramientas, sesion, mensaje, ctx, decision?, maxIteraciones?, maxTokensSesion? }) → { reply, toolCalls: { nombre, args, resultado: string, ok, ms }[], needsConfirmation }`.
+`herramientas` sale de `construirRegistro({ oc })` (`src/agent/registro.ts`) con claves `oc_<export>`. `sesion` sale de `crearSesion(id)` (`src/agent/sesion.ts`).
+
+| # | Regla de implementación |
+|---|---|
+| CA1 | Tope `MAX_ITERACIONES` (default 25, env). Al alcanzarlo: responder qué se tiene y qué falta. |
+| CA2 | El prompt prohíbe afirmar valores que no salgan de herramientas. |
+| CA3 (HITL) | `needsConfirmation` lo calcula el **código** (`validar` apta con confirmaciones / `crear` devolvió `requiere_confirmacion`), no el texto del modelo. La sesión guarda `confirmacionPendiente: { caso, codigos }`. La decisión humana llega explícita (`decision: "aprobar" \| "rechazar"` desde los botones) o por texto (`src/agent/hitl.ts`: cualquier negación ⇒ rechazo). `confirmado: true` solo se respeta para el caso que el humano aprobó en **este** turno; si no, el loop lo fuerza a `false`. |
+| CA4 | Cada tool call queda en `toolCalls` del turno, en el historial de sesión y en `out/log.jsonl` (sin secretos). |
+| CA5 | Error de herramienta o proveedor (incluye timeout) → `reply` legible, la sesión sigue viva. |
+| Costo | `MAX_TOKENS_SESION` configurable; al excederlo se responde con aviso y no se llama al LLM. |
+
+## API (documentar en README)
+`POST /api/chat {sessionId, message?, decision?, estado?}` → `{ reply, toolCalls[], needsConfirmation, pendiente, estado }` · `GET /api/sessions/:id` · `GET /api/health` → `{ ok, provider, model }`.
+Los campos `decision`, `estado` y `pendiente` son **aditivos**: el contrato del PRD (`{sessionId, message}` → `{reply, toolCalls, needsConfirmation}`) sigue funcionando igual.
+`src/server.ts` exporta `crearApp({ llm, directory, proveedor, modelo, store?, config? })` con `fetch(Request)` para poder probarlo sin red. Body inválido → 4xx con `{ error }`, nunca 500.
+
+## Serverless (Vercel)
+- `api/index.ts` adapta Hono con `hono/vercel`; `vercel.json` usa runtime Bun y empaqueta `fixtures/`, `agent/`, `src/knowledge/`.
+- Escritura solo en `dirSalida()`: `OUT_DIR`, o `/tmp/out` si `VERCEL`, o `<raíz>/out` en local. Es efímero: documentarlo.
+- Memoria por `sessionId`: `ArchivoSesionStore` (en `/tmp`) + token `estado` firmado con HMAC (`SESSION_SECRET`) que el front reenvía. Si la copia local no termina igual que el token, gana el token. Token alterado ⇒ sesión nueva.
+
+## Seguridad
+La clave solo se lee de `process.env` en el backend. Nunca en front, logs, `/api/health`, errores devueltos ni `out/`.
+
+## Front (`web/`)
+Historial, input, indicador "pensando", cada tool call (nombre, args, resultado resumido) y estado de confirmación **resaltado** con botones Confirmar/Cancelar.
+Identidad visual: tokens de `identidad_visual_chatgpt.txt` en `web/src/styles.css` (tema claro/oscuro con `data-theme`, `web/src/tema.ts`). Las tool calls van en un desplegable gris (`components/Actividad.tsx`), no en tarjetas.
+Los `useEffect` siempre con cuerpo `{ }`: una flecha que devuelve valor (p. ej. `scrollIntoView`, que en Chrome devuelve una Promise) se toma como cleanup y rompe React.

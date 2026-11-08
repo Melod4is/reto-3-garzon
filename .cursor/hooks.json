@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      { "command": "node reto-03/scripts/hooks/verificacion.cjs marcar cursor" }
+    ],
+    "stop": [
+      { "command": "node reto-03/scripts/hooks/verificacion.cjs verificar cursor", "timeout": 300, "loop_limit": 3 }
+    ]
+  }
+}

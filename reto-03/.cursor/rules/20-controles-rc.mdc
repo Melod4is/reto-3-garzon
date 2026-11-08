@@ -1,0 +1,42 @@
+---
+description: Reglas de control RC1-RC10, normalización de datos y resultado esperado por caso sol-001..sol-006
+globs: src/lib/**,src/tools/**,src/knowledge/**,tests/**,demo.ts
+alwaysApply: false
+---
+
+# Reglas de control (PRD 7.3)
+
+| RC | Regla | Tipo |
+|---|---|---|
+| RC1 | Proveedor existe (por NIT; sin NIT, por nombre normalizado) y `activo` | Bloqueo |
+| RC2 | Aprobación existe, contiene "Aprobado" y su `de` es aprobador del `centro_costo` | Bloqueo |
+| RC3 | `valor_total` ≤ `tope` del aprobador en ese centro | Bloqueo |
+| RC4 | `subarea` ∈ subáreas del centro | Bloqueo |
+| RC5 | `abs(cot.total − sol.valor_total)/sol.valor_total` ≤ 0.02; si excede o no hay cotización → confirmar con ambos valores | Confirmación |
+| RC6 | `indicador_iva` ausente → derivar `indicador_iva_default` + confirmar | Confirmación + derivado |
+| RC7 | `condiciones_pago` ausente → derivar del proveedor, solo informar | Derivado |
+| RC8 | `factura.fecha` < `fecha_solicitud` → `retroactiva = true` + confirmar | Confirmación |
+| RC9 | fecha de aprobación ≥ `fecha_solicitud`, si no → confirmar | Confirmación |
+| RC10 | `cantidad × valor_unitario` = `valor_total` (±1) | Bloqueo |
+
+Cada RC es una función pura en `src/lib/reglas.ts` testeable de forma aislada. Los umbrales viven en una constante, no dispersos.
+
+## Normalización (trampas reales de los fixtures)
+- Montos de texto `COP 11.400.000` → `11400000` (punto = miles). Monto no numérico → `{ ok:false }`.
+- NIT `900.555.111-2` → `900555111` (quitar puntos y dígito de verificación).
+- Nombre: minúsculas, sin tildes ni puntuación, espacios colapsados (`TecnoSuministros S.A.S.` ≡ `tecnosuministros sas`).
+- Fechas: comparar la parte de fecha en su propio offset (`2026-08-26T18:45:00-05:00` → `2026-08-26`), nunca convertir a UTC antes.
+- "Aprobado": búsqueda sin distinguir mayúsculas como palabra (`Aprobado por 25 millones` cuenta).
+- Payload: `descripcion` ≤ 40 caracteres (truncar y registrar en trazabilidad). `unidad`: `H` si el ítem es por horas; por defecto `UN`. `sol-001` dice "12 meses" pero son 120 licencias → `UN`.
+
+## Resultado esperado (oráculo de tests y demo)
+| Caso | Bloqueos | Confirmaciones | Derivados | Retroactiva | OC |
+|---|---|---|---|---|---|
+| sol-001 | — | — | — | false | se crea (`4500000001` en demo) |
+| sol-002 | RC1 (NIT 901999000 no existe) | — | — | false | no |
+| sol-003 | RC2 (fvargas es de CC-3030, no CC-2020) | — | — | false | no |
+| sol-004 | — | RC5 (25.000.000 vs 26.500.000 = 6 %) | — | false | solo con confirmación |
+| sol-005 | — | RC8 (factura 2026-08-10 < 2026-08-27) | — | **true** | solo con confirmación |
+| sol-006 | — | RC6 (IVA ausente) | iva `C1`, pago `Z030` | false | solo con confirmación |
+
+En `sol-003` la acción sugerida debe decir que ningún aprobador de CC-2020 tiene tope ≥ 74.000.000 (rtorres: 30 M) → escalar.

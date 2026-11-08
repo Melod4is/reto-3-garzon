@@ -1,0 +1,44 @@
+---
+description: Contexto, alcance, estructura y prohibiciones del Reto 03 (agente de Órdenes de Compra SAP)
+alwaysApply: true
+---
+
+# Reto 03 · Agente conversacional "Órdenes de Compra SAP"
+
+Fuente de verdad: `PRD.md`. Si una regla de aquí contradice el PRD, gana el PRD y se corrige la regla.
+
+## Stack
+- TypeScript estricto (sin `any`), Bun como runtime y test runner (`bun test`). Node 20+ solo si Bun no es viable.
+- `zod` obligatorio para args de herramientas y para el esquema `OrdenCompra`.
+- Front libre (HTML plano o React) en `web/`. Sin base de datos: todo en `out/`.
+
+## Estructura (separación evaluada)
+| Qué | Dónde |
+|---|---|
+| Comportamiento (system prompt) | `agent/prompt.md` — nunca embebido en código |
+| Conocimiento del proceso | `src/knowledge/ordenes-compra.md` |
+| Ejecución (herramientas) | `src/tools/oc.ts` → nombres `oc_<export>` |
+| Funciones puras (parseo, normalización, reglas RC) | `src/lib/` (`normalizar.ts`, `maestros.ts`, `reglas.ts`, `esquemas.ts`) |
+| Ciclo del agente | `src/agent/loop.ts` (`ejecutarTurno`), `sesion.ts`, `registro.ts` |
+| Adaptador LLM | `src/llm/adapter.ts` + `src/llm/<proveedor>.ts` |
+| SAP | `src/sap/adapter.ts` (interfaz del PRD 7.4) + `src/sap/mock.ts` |
+| HTTP | `src/server.ts` (solo orquesta, sin reglas de negocio) |
+| Verificación sin modelo | `demo.ts` |
+| Pruebas | `tests/*.test.ts` (ver regla `40-pruebas.mdc`) |
+| Verificación obligatoria | `scripts/verificar.ts` → `bun run verify` |
+
+Un cambio de reglas de negocio NO debe tocar `src/server.ts` ni `src/agent/loop.ts`.
+
+## Prohibido
+- Modificar `fixtures/` (solo lectura).
+- Claves, tokens o datos personales reales en código, front, logs, respuestas de API o commits. Solo `.env` (ignorado) y `.env.example` sin valores.
+- Ejecutar comandos de shell desde las herramientas.
+- Rutas absolutas: todo se resuelve desde `ctx.directory`.
+- Que el modelo "arregle" montos: los valores salen de herramientas.
+
+## Entregables (checklist de cierre)
+`README.md` (un comando para levantar, variables, demo, link) · `SOLUCION.md` (12 secciones del PRD 9.1, incluye uso de IA) · `demo.ts` · link público · `.env.example`. Bonus: `modulo/` reutilizando las mismas piezas (no copias divergentes).
+No entregar `node_modules/`, `out/`, `.env`.
+
+## Definición de terminado
+`bun run verify` en verde. Agrupa: `tsc --noEmit` sin errores · `bun test` en verde · `bun run demo.ts` dos veces con salida idéntica (salvo timestamps) · sin secretos ni `any` en el código. Procedimiento en la skill `verificar-reto03`.

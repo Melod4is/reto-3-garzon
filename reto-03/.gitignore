@@ -1,0 +1,10 @@
+node_modules/
+out/
+.env
+.env.*
+!.env.example
+.verificacion/
+web/dist/
+
+.vercel
+.env*

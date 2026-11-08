@@ -1,0 +1,41 @@
+---
+description: Pruebas obligatorias y criterios de aceptación mínimos. Todo cambio de código se cierra con la skill verificar-reto03.
+alwaysApply: true
+---
+
+# Pruebas obligatorias
+
+**Todo cambio** en `src/`, `tests/`, `agent/`, `web/`, `modulo/`, `scripts/`, `demo.ts`, `package.json` o `tsconfig.json` se cierra ejecutando la skill `verificar-reto03` (`.cursor/skills/verificar-reto03/SKILL.md`), es decir `bun run verify`. No se reporta una tarea como terminada con la verificación en rojo.
+
+Los hooks del proyecto (`.cursor/hooks.json`, `.claude/settings.json`) ejecutan la verificación al terminar el turno si hubo cambios de código y devuelven el fallo al agente para que lo corrija.
+
+## Reglas
+- Los tests en `tests/` son la especificación ejecutable del PRD. Se escriben antes o junto con el código (TDD).
+- **Prohibido** para hacer pasar la verificación: borrar o relajar aserciones, usar `test.skip`/`test.todo`, cambiar el oráculo de casos (regla `20-controles-rc.mdc`) o tocar `fixtures/`. Si un test contradice el PRD, se corrige citando la sección del PRD.
+- Los tests nunca usan red ni claves reales: el LLM se sustituye por `tests/fakes/fake-llm.ts` y cada test escribe en un directorio temporal (`crearEntorno()` de `tests/helpers.ts`).
+- Una regla de negocio nueva = un test nuevo en `tests/reglas.test.ts` o `tests/casos.test.ts`.
+
+## Contrato de módulos que asumen los tests
+| Módulo | Exporta |
+|---|---|
+| `src/lib/normalizar.ts` | `parsearMonto`, `normalizarNit`, `normalizarNombre`, `fechaLocal`, `contieneAprobado` |
+| `src/lib/maestros.ts` | `cargarMaestros(directory)` |
+| `src/lib/reglas.ts` | `validarPaquete(paquete, maestros)` |
+| `src/lib/esquemas.ts` | `OrdenCompraSchema` (zod) |
+| `src/tools/oc.ts` | `leer_paquete`, `validar`, `construir_payload`, `generar_evidencia`, `crear` |
+| `src/agent/registro.ts` | `construirRegistro({ oc })` |
+| `src/agent/sesion.ts` | `crearSesion(id)` |
+| `src/agent/loop.ts` | `ejecutarTurno(...)` |
+| `src/llm/adapter.ts` | tipos `LlmAdapter`, `Mensaje`, `HerramientaSpec`, `RespuestaLlm` |
+| `src/server.ts` | `crearApp(deps)` |
+
+## Mapa criterio de aceptación → test
+| Criterio (PRD) | Archivo |
+|---|---|
+| Normalización (montos, NIT, nombres, fechas, "Aprobado") | `tests/normalizar.test.ts` |
+| RC1–RC10, una prueba positiva y una negativa por regla | `tests/reglas.test.ts` |
+| Contrato 6.2 (description, zod `.describe()`, nunca lanza) · HU-1 · HU-6 | `tests/herramientas.test.ts` |
+| O1–O4 · HU-2…HU-5 · idempotencia · control.csv · trazabilidad · evidencia | `tests/casos.test.ts` |
+| CA1–CA5 · tope de tokens · confirmación forzada por código | `tests/agente.test.ts` |
+| API 6.4 · `/api/health` sin claves · body inválido no tumba el server | `tests/api.test.ts` |
+| Determinismo de `demo.ts` · sin secretos · sin `any` · tools sin shell | `scripts/verificar.ts` |
